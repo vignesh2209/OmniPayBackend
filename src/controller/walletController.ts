@@ -1,7 +1,9 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import axios from 'axios';
-import { CoinGeckoId, Markup, SupportedNetworks, coingeckoUrl } from "../constants";
+import { Wallet, ethers, providers } from "ethers";
+import { CoinGeckoId, Markup, PaymasterAddresses, SupportedNetworks, bundlerUrls, coingeckoUrl, PaymasterAbi } from "../constants";
 import 'dotenv/config'
+import { arrayify, defaultAbiCoder, hexConcat } from "ethers/lib/utils";
 
 export default async function walletController(fastify: FastifyInstance) {
 	// POST /api/v1/wallet
@@ -12,9 +14,9 @@ export default async function walletController(fastify: FastifyInstance) {
 		try {
 			const body: any = request.body;
 			if (!body)
-				reply.code(400).send('Body not found')
+				reply.code(400).send({ error: true, message: 'Body not found' })
 			if (!body.chainId || !body.amount)
-				reply.code(400).send('Invalid Body')
+				reply.code(400).send({ error: true, message: 'Invalid Body' })
 			const coingeckoChainId = CoinGeckoId[body.chainId];
 			if (!coingeckoChainId) reply.code(400).send({ error: true, message: 'Chain not supported' })
 			const response = await axios.get(`${coingeckoUrl}&ids=${coingeckoChainId}&x_cg_demo_api_key=${process.env.CoinGeckoApiKey}`);
@@ -26,7 +28,7 @@ export default async function walletController(fastify: FastifyInstance) {
 			reply.code(200).send({ error: false, usdAmount });
 		} catch (err) {
 			console.log(err);
-			reply.code(400).send('something went wrong')
+			reply.code(400).send({ error: true, message: 'something went wrong' })
 		}
 	});
 
@@ -36,12 +38,67 @@ export default async function walletController(fastify: FastifyInstance) {
 	) {
 		const body: any = request.body;
 		if (!body)
-			reply.code(400).send('Body not found')
+			reply.code(400).send({ error: true, message: 'Body not found' })
 		if (!body.chainId)
-			reply.code(400).send('Invalid Body')
+			reply.code(400).send({ error: true, message: 'Invalid Body' })
 		const chainId = body.chainId;
 		if (!SupportedNetworks.includes(chainId))
-			reply.code(400).send('Unsupported ChainId')
-		reply.code(200).send({error: false, address: process.env.FeeCollector})
+			reply.code(400).send({ error: true, message: 'Unsupported ChainId' })
+		reply.code(200).send({ error: false, address: process.env.FeeCollector })
+	});
+
+	fastify.post("/generatePaymasterAndData", async function (
+		request: FastifyRequest,
+		reply: FastifyReply,
+	) {
+		try {
+			const body: any = JSON.parse(request.body as string);
+			if (!body)
+				reply.code(400).send({ error: true, message: 'Body not found' })
+			if (!body.chainId || !body.userOp)
+				reply.code(400).send({ error: true, message: 'Invalid Body' })
+			const bundlerRpc = bundlerUrls[body.chainId];
+			console.log(body.userOp);
+			const provider = new providers.JsonRpcProvider(bundlerRpc);
+			console.log('Paymaster Address: ', PaymasterAddresses[body.chainId]);
+			const paymasterContract = new ethers.Contract(PaymasterAddresses[body.chainId], PaymasterAbi.default, provider);
+			const date = new Date();
+			const hex = (Number((date.valueOf() / 1000).toFixed(0)) + 600).toString(16);
+			const hex1 = (Number((date.valueOf() / 1000).toFixed(0))).toString(16);
+			let validAfter = '0x'
+			let validUntil = '0x'
+			for (let i = 0; i < 14 - hex.length; i++) {
+				validUntil += '0';
+			}
+			for (let i = 0; i < 14 - hex1.length; i++) {
+				validAfter += '0';
+			}
+			validUntil += hex;
+			validAfter += hex1;
+
+			if (!process.env.PaymasterWallet) reply.code(400).send('No Wallet added to env');
+			const signer = new Wallet(process.env.PaymasterWallet as string, provider)
+			const hash = await paymasterContract.getHash(
+				body.userOp,
+				validUntil,
+				validAfter
+			);
+
+			const sig = await signer.signMessage(arrayify(hash));
+
+			const paymasterAndData = hexConcat([
+				paymasterContract.address,
+				defaultAbiCoder.encode(
+					['uint48', 'uint48'],
+					[validUntil, validAfter]
+				),
+				sig,
+			]);
+
+			reply.code(200).send({ error: false, paymasterAndData })
+		} catch (err) {
+			console.log('err: ', err);
+			reply.code(400).send({ error: true, message: 'Something went wrong' })
+		}
 	});
 }
