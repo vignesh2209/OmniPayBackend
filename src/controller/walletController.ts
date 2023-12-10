@@ -13,7 +13,7 @@ export default async function walletController(fastify: FastifyInstance) {
 		"/fetch_price",
 		async function (request: FastifyRequest, reply: FastifyReply) {
 			try {
-				const { chainId, userOp } = request.body as FetchPrice;
+				const { chainId, userOp } = JSON.parse(request.body as string) as FetchPrice;
 				if (!chainId || !userOp) reply.code(400).send("Invalid Body");
 				const coingeckoChainId = CoinGeckoId[chainId];
 				if (!coingeckoChainId)
@@ -51,13 +51,18 @@ export default async function walletController(fastify: FastifyInstance) {
 	fastify.post(
 		"/receiverAddress",
 		async function (request: FastifyRequest, reply: FastifyReply) {
-			const body: any = request.body;
+			try {
+			const body: any = JSON.parse(request.body as string);
 			if (!body) reply.code(400).send("Body not found");
 			if (!body.chainId) reply.code(400).send("Invalid Body");
 			const chainId = body.chainId;
 			if (!SupportedNetworks.includes(chainId))
 				reply.code(400).send("Unsupported ChainId");
 			reply.code(200).send({ error: false, address: process.env.FeeCollector });
+			} catch (err) {
+				console.log('err: ', err);
+				reply.code(400).send({ error: true, message: 'Something went wrong' })
+			}
 		}
 	);
 
