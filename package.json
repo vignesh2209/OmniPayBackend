@@ -12,7 +12,7 @@
   "author": "Matschik <mathieu.schimmerling@protonmail.com>",
   "license": "MIT",
   "dependencies": {
-    "@fastify/cors": "^8.4.2",
+    "@fastify/cors": "^9.0.0",
     "axios": "^1.6.2",
     "dotenv": "^16.3.1",
     "ethers": "5.7.0",
